@@ -1,0 +1,136 @@
+networks:
+  keycloak-network:
+    driver: bridge
+
+volumes:
+  keycloak-data:
+  backend-data:
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: keycloak-postgres
+    networks:
+      - keycloak-network
+    environment:
+      POSTGRES_USER: ${KC_DB_USERNAME}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD}
+      POSTGRES_DB: ${KC_DB}
+    volumes:
+      - keycloak-data:/var/lib/postgresql
+    ports:
+      - "${KC_DB_URL_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KC_DB_USERNAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 512m
+    restart: unless-stopped
+
+  postgres_backend:
+    image: postgres:latest
+    container_name: backend-postgres
+    networks:
+      - keycloak-network
+    environment:
+      POSTGRES_USER: ${BACKEND_DB_USER}
+      POSTGRES_PASSWORD: ${BACKEND_DB_PASSWORD}
+      POSTGRES_DB: ${BACKEND_DB_NAME}
+    volumes:
+      - backend-data:/var/lib/postgresql
+    ports:
+      - "${BACKEND_DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BACKEND_DB_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 512m
+    restart: unless-stopped  
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: keycloak-dev-server
+    command: ["start-dev"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - keycloak-network
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_DB: ${KC_DB}
+      KC_DB_URL: jdbc:postgresql://postgres:${KC_DB_URL_PORT}/${KC_DB}
+      KC_DB_USERNAME: ${KC_DB_USERNAME}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "${KC_HTTP_PORT}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: 1g
+    cpus: 1.0
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: demo-backend
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      postgres_backend:
+        condition: service_healthy
+    networks:
+      - keycloak-network
+    environment:
+      DB_HOST: ${BACKEND_DB_HOST}
+      DB_PORT: ${BACKEND_DB_PORT}
+      DB_NAME: ${BACKEND_DB_NAME}
+      DB_USER: ${BACKEND_DB_USER}
+      DB_PASSWORD: ${BACKEND_DB_PASSWORD}
+      KC_URL: http://${KC_HOSTNAME}:${KC_HTTP_PORT}
+      KC_REALM: ${APP_REALM_NAME}
+      KC_CLIENT_ID: ${BACKEND_CLIENT_ID}
+      KC_CLIENT_SECRET: ${BACKEND_CLIENT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "${BACKEND_PORT}:3001"
+    volumes:
+      - ./backend:/app
+    command: npm run start:dev
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: demo-frontend
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - keycloak-network
+    environment:
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:${BACKEND_PORT}
+      NEXT_PUBLIC_AUTH_URL: ${NEXT_PUBLIC_AUTH_URL}
+      NEXT_PUBLIC_AUTH_SECRET: ${NEXT_PUBLIC_AUTH_SECRET}
+      KC_CLIENT_ID: ${FRONTEND_CLIENT_ID}
+      KC_ISSUER: http://localhost:${KC_HTTP_PORT}/realms/${APP_REALM_NAME}
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    volumes:
+      - ./frontend:/app
+    command: npm run dev
+    restart: unless-stopped
