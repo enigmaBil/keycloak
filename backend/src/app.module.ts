@@ -13,7 +13,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { RolesGuard } from './common/guards/roles.guard';
 import { RequestIdMiddleware } from './common/middlewares/request-id.middleware';
-import { KeycloakUserSyncMiddleware } from './common/middlewares/keycloak-user-sync.middleware';
+import { UserSyncInterceptor } from './common/interceptors/user-sync.interceptor';
 
 @Module({
   imports: [TodosModule, UsersModule, AuthModule, PrismaModule,
@@ -37,6 +37,10 @@ import { KeycloakUserSyncMiddleware } from './common/middlewares/keycloak-user-s
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: UserSyncInterceptor,
     },
     
     // Global Validation Pipe
@@ -68,10 +72,5 @@ export class AppModule implements NestModule {
     consumer
       .apply(RequestIdMiddleware)
       .forRoutes('*'); // Appliqué sur toutes les routes
-
-    consumer
-      .apply(KeycloakUserSyncMiddleware)
-      .exclude('auth/health', '/', 'health') // Exclure les routes publiques
-      .forRoutes('*'); // Synchroniser l'utilisateur sur toutes les autres routes
   }
 }

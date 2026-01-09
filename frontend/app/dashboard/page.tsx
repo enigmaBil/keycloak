@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { signOut, useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -32,12 +33,15 @@ import { todosApi, type Todo, type CreateTodoDto } from "@/lib/api"
 
 export default function DashboardPage() {
   const router = useRouter()
+  const { data: session } = useSession()
   const [todos, setTodos] = useState<Todo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
-  const [newTodo, setNewTodo] = useState<CreateTodoDto>({ title: "", description: "" })
+  const [newTodo, setNewTodo] = useState<CreateTodoDto>({ title: "", summary: "" })
   const [searchQuery, setSearchQuery] = useState("")
   const [filter, setFilter] = useState<"all" | "active" | "completed">("all")
+  const [editingTodo, setEditingTodo] = useState<Todo | null>(null)
+  const [editForm, setEditForm] = useState<{ title: string; summary: string }>({ title: "", summary: "" })
 
   useEffect(() => {
     loadTodos()
@@ -45,8 +49,8 @@ export default function DashboardPage() {
 
   const loadTodos = async () => {
     try {
-      const data = await todosApi.getAll(1, 50)
-      setTodos(data.todos)
+      const response = await todosApi.getAll(1, 50)
+      setTodos(response.data)
     } catch (error) {
       console.error("Erreur lors du chargement des todos:", error)
     } finally {
@@ -61,8 +65,8 @@ export default function DashboardPage() {
     setIsCreating(true)
     try {
       const created = await todosApi.create(newTodo)
-      setTodos([created, ...todos])
-      setNewTodo({ title: "", description: "" })
+      setTodos([created, ...(todos || [])])
+      setNewTodo({ title: "", summary: "" })
     } catch (error) {
       console.error("Erreur lors de la création:", error)
     } finally {
@@ -73,7 +77,7 @@ export default function DashboardPage() {
   const handleToggleComplete = async (todo: Todo) => {
     try {
       const updated = await todosApi.toggleComplete(todo.id, !todo.completed)
-      setTodos(todos.map((t) => (t.id === todo.id ? updated : t)))
+      setTodos((todos || []).map((t) => (t.id === todo.id ? updated : t)))
     } catch (error) {
       console.error("Erreur lors de la mise à jour:", error)
     }
@@ -82,18 +86,46 @@ export default function DashboardPage() {
   const handleDeleteTodo = async (id: string) => {
     try {
       await todosApi.delete(id)
-      setTodos(todos.filter((t) => t.id !== id))
+      setTodos((todos || []).filter((t) => t.id !== id))
     } catch (error) {
       console.error("Erreur lors de la suppression:", error)
     }
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem("accessToken")
-    router.push("/login")
+  const handleEditTodo = (todo: Todo) => {
+    setEditingTodo(todo)
+    setEditForm({ title: todo.title, summary: todo.summary || "" })
   }
 
-  const filteredTodos = todos
+  const handleCancelEdit = () => {
+    setEditingTodo(null)
+    setEditForm({ title: "", summary: "" })
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingTodo || !editForm.title.trim()) return
+
+    try {
+      const updated = await todosApi.update(editingTodo.id, {
+        title: editForm.title,
+        summary: editForm.summary || undefined,
+      })
+      setTodos((todos || []).map((t) => (t.id === editingTodo.id ? updated : t)))
+      handleCancelEdit()
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour:", error)
+    }
+  }
+
+  const handleLogout = async () => {
+    // Déconnexion de NextAuth ET de Keycloak (SSO)
+    const idToken = (session as any)?.idToken
+    const keycloakLogoutUrl = `http://192.168.100.144:8080/realms/Demo-Realm/protocol/openid-connect/logout?id_token_hint=${idToken}&post_logout_redirect_uri=${encodeURIComponent('http://192.168.100.144:3000')}`
+    await signOut({ redirect: false })
+    window.location.href = keycloakLogoutUrl
+  }
+
+  const filteredTodos = (todos || [])
     .filter((todo) => {
       const matchesSearch = todo.title.toLowerCase().includes(searchQuery.toLowerCase())
       const matchesFilter =
@@ -104,9 +136,9 @@ export default function DashboardPage() {
     })
 
   const stats = {
-    total: todos.length,
-    active: todos.filter((t) => !t.completed).length,
-    completed: todos.filter((t) => t.completed).length,
+    total: (todos || []).length,
+    active: (todos || []).filter((t) => !t.completed).length,
+    completed: (todos || []).filter((t) => t.completed).length,
   }
 
   if (isLoading) {
@@ -198,12 +230,12 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="description">Description (optionnelle)</Label>
+                <Label htmlFor="summary">Description (optionnelle)</Label>
                 <Input
-                  id="description"
+                  id="summary"
                   placeholder="Ajoutez des détails..."
-                  value={newTodo.description || ""}
-                  onChange={(e) => setNewTodo({ ...newTodo, description: e.target.value })}
+                  value={newTodo.summary || ""}
+                  onChange={(e) => setNewTodo({ ...newTodo, summary: e.target.value })}
                 />
               </div>
               <Button type="submit" disabled={isCreating} className="w-full">
@@ -269,48 +301,81 @@ export default function DashboardPage() {
                 }`}
               >
                 <CardContent className="py-4">
-                  <div className="flex items-center gap-4">
-                    <button onClick={() => handleToggleComplete(todo)}>
-                      {todo.completed ? (
-                        <CheckCircle2 className="h-6 w-6 text-green-500" />
-                      ) : (
-                        <Circle className="h-6 w-6 text-muted-foreground hover:text-primary" />
-                      )}
-                    </button>
-                    <div className="flex-1">
-                      <h3
-                        className={`font-medium ${
-                          todo.completed ? "line-through text-muted-foreground" : ""
-                        }`}
-                      >
-                        {todo.title}
-                      </h3>
-                      {todo.description && (
-                        <p className="text-sm text-muted-foreground">{todo.description}</p>
-                      )}
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreVertical className="h-4 w-4" />
+                  {editingTodo?.id === todo.id ? (
+                    // Mode édition
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-title">Titre</Label>
+                        <Input
+                          id="edit-title"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          placeholder="Titre de la tâche"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-summary">Description</Label>
+                        <Input
+                          id="edit-summary"
+                          value={editForm.summary}
+                          onChange={(e) => setEditForm({ ...editForm, summary: e.target.value })}
+                          placeholder="Description (optionnelle)"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={handleSaveEdit} size="sm" className="flex-1">
+                          Enregistrer
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Edit className="mr-2 h-4 w-4" />
-                          Modifier
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteTodo(todo.id)}
-                          className="text-destructive"
+                        <Button onClick={handleCancelEdit} variant="outline" size="sm" className="flex-1">
+                          Annuler
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Mode normal
+                    <div className="flex items-center gap-4">
+                      <button onClick={() => handleToggleComplete(todo)}>
+                        {todo.completed ? (
+                          <CheckCircle2 className="h-6 w-6 text-green-500" />
+                        ) : (
+                          <Circle className="h-6 w-6 text-muted-foreground hover:text-primary" />
+                        )}
+                      </button>
+                      <div className="flex-1">
+                        <h3
+                          className={`font-medium ${
+                            todo.completed ? "line-through text-muted-foreground" : ""
+                          }`}
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Supprimer
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                          {todo.title}
+                        </h3>
+                        {todo.summary && (
+                          <p className="text-sm text-muted-foreground">{todo.summary}</p>
+                        )}
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEditTodo(todo)}>
+                            <Edit className="mr-2 h-4 w-4" />
+                            Modifier
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteTodo(todo.id)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Supprimer
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))

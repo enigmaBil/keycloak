@@ -1,4 +1,5 @@
 import axios from "axios"
+import { getSession } from "next-auth/react"
 
 const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1",
@@ -9,11 +10,13 @@ const apiClient = axios.create({
 
 // Intercepteur pour ajouter le token d'authentification
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("accessToken")
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`
+      // Get token from NextAuth session
+      const session = await getSession()
+      console.log("Session in interceptor:", session ? "exists" : "null", session?.accessToken ? "has token" : "no token")
+      if (session?.accessToken) {
+        config.headers.Authorization = `Bearer ${session.accessToken}`
       }
     }
     return config
@@ -28,39 +31,63 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expiré ou invalide
+      // Token expiré ou invalide - redirect to home page (login)
       if (typeof window !== "undefined") {
-        localStorage.removeItem("accessToken")
-        window.location.href = "/login"
+        window.location.href = "/"
       }
     }
     return Promise.reject(error)
   }
 )
 
+// ==================== Types et Interfaces ====================
+
+// Todo Types
 export interface Todo {
   id: string
   title: string
-  description?: string
+  summary: string | null
   completed: boolean
+  userId: string
   createdAt: string
   updatedAt: string
-  userId: string
 }
 
 export interface CreateTodoDto {
   title: string
-  description?: string
+  summary?: string
+  completed?: boolean
 }
 
 export interface UpdateTodoDto {
   title?: string
-  description?: string
+  summary?: string
   completed?: boolean
 }
 
+// User Types
+export interface User {
+  id: string
+  username: string
+  email: string
+}
+
+export interface CreateUserDto {
+  username: string
+  email: string
+  password: string
+}
+
+export interface UpdateUserDto {
+  username?: string
+  email?: string
+  password?: string
+}
+
+// ==================== API Functions ====================
+
 export const todosApi = {
-  getAll: async (page = 1, limit = 10): Promise<{ todos: Todo[]; total: number }> => {
+  getAll: async (page = 1, limit = 10): Promise<{ data: Todo[]; meta: { total: number; page: number; limit: number; totalPages: number } }> => {
     const response = await apiClient.get(`/todos?page=${page}&limit=${limit}`)
     return response.data
   },

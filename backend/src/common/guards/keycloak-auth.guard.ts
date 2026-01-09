@@ -1,10 +1,12 @@
-import { Injectable, ExecutionContext } from '@nestjs/common';
+import { Injectable, ExecutionContext, Logger } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
 export class KeycloakAuthGuard extends AuthGuard('keycloak') {
+  private readonly logger = new Logger(KeycloakAuthGuard.name);
+  
   constructor(private reflector: Reflector) {
     super();
   }
@@ -17,6 +19,14 @@ export class KeycloakAuthGuard extends AuthGuard('keycloak') {
 
     if (isPublic) {
       return true;
+    }
+
+    // Log authorization header
+    const request = context.switchToHttp().getRequest();
+    const authHeader = request.headers.authorization;
+    this.logger.debug(`Authorization header: ${authHeader ? 'présent' : 'absent'}`);
+    if (authHeader) {
+      this.logger.debug(`Token length: ${authHeader.length}`);
     }
 
     return super.canActivate(context);

@@ -99,7 +99,7 @@ services:
       DB_NAME: ${BACKEND_DB_NAME}
       DB_USER: ${BACKEND_DB_USER}
       DB_PASSWORD: ${BACKEND_DB_PASSWORD}
-      KC_URL: http://${KC_HOSTNAME}:${KC_HTTP_PORT}
+      KC_URL: http://keycloak:8080
       KC_REALM: ${APP_REALM_NAME}
       KC_CLIENT_ID: ${BACKEND_CLIENT_ID}
       KC_CLIENT_SECRET: ${BACKEND_CLIENT_SECRET}
@@ -123,14 +123,21 @@ services:
     networks:
       - keycloak-network
     environment:
-      NEXT_PUBLIC_BACKEND_URL: http://localhost:${BACKEND_PORT}
-      NEXT_PUBLIC_AUTH_URL: ${NEXT_PUBLIC_AUTH_URL}
-      NEXT_PUBLIC_AUTH_SECRET: ${NEXT_PUBLIC_AUTH_SECRET}
-      KC_CLIENT_ID: ${FRONTEND_CLIENT_ID}
-      KC_ISSUER: http://localhost:${KC_HTTP_PORT}/realms/${APP_REALM_NAME}
+      NEXT_PUBLIC_BACKEND_URL: http://192.168.100.144:3001
+      NEXT_PUBLIC_API_URL: http://192.168.100.144:3001/api/v1
+      NEXT_PUBLIC_KEYCLOAK_ISSUER: http://192.168.100.144:8080/realms/Demo-Realm
+      KEYCLOAK_CLIENT_ID: demo-frontend
+      KEYCLOAK_CLIENT_SECRET: FA6ui4wDoi83Qy2Vn0EexWcjJ4K7HqWY
+      KEYCLOAK_ISSUER: http://192.168.100.144:8080/realms/Demo-Realm
+      AUTH_SECRET: mysupersecretkey123456789012345678
+      NEXTAUTH_SECRET: mysupersecretkey123456789012345678
+      NEXTAUTH_URL: http://192.168.100.144:3000
+      AUTH_TRUST_HOST: "true"
     ports:
-      - "${FRONTEND_PORT}:3000"
+      - "3000:3000"
     volumes:
       - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
     command: npm run dev
     restart: unless-stopped

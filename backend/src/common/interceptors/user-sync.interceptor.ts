@@ -1,18 +1,18 @@
-import { Injectable, NestMiddleware } from "@nestjs/common";
-import { NextFunction, Response, Request } from "express";
-import { PrismaService } from "src/database/prisma.service";
-import { KeycloakUser } from "../strategies/keycloak.strategy";
-
+import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
+import { PrismaService } from 'src/database/prisma.service';
+import { KeycloakUser } from '../strategies/keycloak.strategy';
 
 @Injectable()
-export class KeycloakUserSyncMiddleware implements NestMiddleware {
+export class UserSyncInterceptor implements NestInterceptor {
   constructor(private prisma: PrismaService) {}
 
-  async use(req: Request, res: Response, next: NextFunction) {
-    const user = req['user'] as KeycloakUser;
-    
+  async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<any>> {
+    const request = context.switchToHttp().getRequest();
+    const user = request.user as KeycloakUser;
+
     if (user && user.sub && user.email) {
-      // Synchroniser l'utilisateur Keycloak avec notre BD
       try {
         await this.prisma.user.upsert({
           where: { id: user.sub },
@@ -28,11 +28,10 @@ export class KeycloakUserSyncMiddleware implements NestMiddleware {
           },
         });
       } catch (error) {
-        // Log mais ne bloque pas la requête
         console.error('Erreur sync utilisateur:', error);
       }
     }
-    
-    next();
+
+    return next.handle();
   }
 }
